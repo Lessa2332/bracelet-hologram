@@ -19,11 +19,13 @@
         }
         #status { color: #ffdd88; margin-bottom: 5px; }
         button {
-            position: absolute; bottom: 20px; right: 20px;
+            position: absolute;
             background: rgba(0,0,0,0.7); border: 2px solid #0f0; color: #0f0;
             padding: 8px 16px; border-radius: 40px; cursor: pointer; z-index: 200;
             font-weight: bold;
         }
+        #reset { bottom: 20px; right: 20px; }
+        #playVideoBtn { bottom: 20px; left: 20px; }
         #loading {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: black; display: flex; flex-direction: column;
@@ -52,6 +54,7 @@
         <div>✊ Стисни кулак → активувати голограму (фіксується)</div>
     </div>
     <button id="reset">⟳ Скинути</button>
+    <button id="playVideoBtn">▶ Запустити відео</button>
 
     <script type="importmap">
         {
@@ -183,14 +186,14 @@
         const hologramVideo = document.createElement('video');
         hologramVideo.setAttribute('loop', '');
         hologramVideo.setAttribute('playsinline', '');
-        hologramVideo.muted = true;
-        hologramVideo.src = 'assets/video/guide_hologram.mp4';  // <-- ваш файл
+        hologramVideo.muted = false;  // дозволяємо звук, але браузер може блокувати
+        hologramVideo.src = 'assets/video/guide_hologram.mp4';
         hologramVideo.load();
         
         const videoTexture = new THREE.VideoTexture(hologramVideo);
         videoTexture.minFilter = THREE.LinearFilter;
         
-        // Покращений шейдер для хромакею (точне вирізання зеленого)
+        // Покращений шейдер для хромакею
         const vertexShader = `
             varying vec2 vUv;
             void main() {
@@ -199,15 +202,12 @@
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }
         `;
-        
         const fragmentShader = `
             uniform sampler2D uVideo;
             uniform float uTime;
             varying vec2 vUv;
-            
             void main() {
                 vec4 color = texture2D(uVideo, vUv);
-                // Конвертуємо RGB в HSV для кращого виділення зеленого
                 float r = color.r, g = color.g, b = color.b;
                 float maxRGB = max(r, max(g, b));
                 float minRGB = min(r, min(g, b));
@@ -220,15 +220,9 @@
                 }
                 float saturation = (maxRGB == 0.0) ? 0.0 : delta / maxRGB;
                 float value = maxRGB;
-                
-                // Зелений діапазон: 80° - 140°, насиченість > 0.3, яскравість > 0.2
                 bool isGreen = (hue > 75.0 && hue < 145.0 && saturation > 0.25 && value > 0.15);
                 float alpha = isGreen ? 0.0 : 1.0;
-                
-                // Якщо піксель зовсім прозорий - викидаємо
                 if (alpha < 0.05) discard;
-                
-                // Голографічний ефект: легке світіння, шум, скануючі лінії
                 float noise = fract(sin(vUv.x * 800.0 + vUv.y * 600.0 + uTime * 10.0) * 43758.5453);
                 vec3 hologramColor = vec3(0.2, 0.9, 0.2);
                 vec3 finalColor = mix(color.rgb, hologramColor, 0.4);
@@ -240,10 +234,7 @@
         `;
         
         const hologramMaterial = new THREE.ShaderMaterial({
-            uniforms: {
-                uVideo: { value: videoTexture },
-                uTime: { value: 0 }
-            },
+            uniforms: { uVideo: { value: videoTexture }, uTime: { value: 0 } },
             vertexShader: vertexShader,
             fragmentShader: fragmentShader,
             transparent: true,
@@ -262,22 +253,27 @@
         let videoReady = false;
         hologramVideo.addEventListener('loadeddata', () => {
             console.log('Відео завантажено, розмір:', hologramVideo.videoWidth, hologramVideo.videoHeight);
-            // Коригуємо пропорції площини
             const aspect = hologramVideo.videoWidth / hologramVideo.videoHeight;
             const newWidth = CONFIG.hologramScale;
             const newHeight = newWidth / aspect;
             hologramPlane.scale.set(newWidth, newHeight, 1);
             videoReady = true;
         });
-        hologramVideo.addEventListener('error', (e) => showError('Помилка завантаження відео: ' + e.message));
+        hologramVideo.addEventListener('error', (e) => showError('Помилка відео: ' + e.message));
         
-        // Запускаємо відтворення, коли можна
-        hologramVideo.play().catch(e => console.warn('Автовідтворення відео заблоковано:', e));
+        // Кнопка запуску відео (бо автовідтворення блокується)
+        const playBtn = document.getElementById('playVideoBtn');
+        playBtn.addEventListener('click', () => {
+            hologramVideo.play().then(() => {
+                console.log('Відео запущено');
+                playBtn.style.display = 'none';
+            }).catch(e => showError('Не вдалося запустити відео: ' + e.message));
+        });
         
         hologramGroup.visible = false;
-        let hologramFixed = false;  // чи зафіксована голограма
+        let hologramFixed = false;   // чи активована голограма (кулаком)
         
-        // Додаткові частинки навколо голограми (декоративні)
+        // Декоративні частинки
         const particlesGroup = new THREE.Group();
         hologramGroup.add(particlesGroup);
         const particleCount = 25;
@@ -371,12 +367,17 @@
                     for (let tip of fingers) if (lm[tip].y > lm[tip-2].y + 0.02) curled++;
                     const isFist = curled >= 3;
                     
-                    // ГОЛОГРАМА ФІКСУЄТЬСЯ ПРИ ПЕРШОМУ СТИСКАННІ
+                    // ГОЛОГРАМА АКТИВУЄТЬСЯ ПРИ ПЕРШОМУ СТИСКАННІ (і більше ніколи)
                     if (isFist && !lastFistState && !hologramFixed) {
                         hologramFixed = true;
                         hologramGroup.visible = true;
                         statusDiv.innerHTML += ' | ✨ ГОЛОГРАМА ЗАФІКСОВАНА ✨';
                         if (navigator.vibrate) navigator.vibrate(100);
+                        // Якщо відео ще не запущене, пропонуємо кнопку (або запускаємо автоматично?)
+                        if (hologramVideo.paused && videoReady) {
+                            // спробуємо автоматично, але може бути заблоковано
+                            hologramVideo.play().catch(e => console.log("Автовідтворення заблоковано, натисніть кнопку"));
+                        }
                     }
                     lastFistState = isFist;
                     
@@ -389,8 +390,9 @@
                 } else {
                     if (isHandVisible) {
                         isHandVisible = false;
-                        statusDiv.innerHTML = '👋 Рука зникла... Браслет сховано, але голограма залишається (якщо була активована).';
+                        statusDiv.innerHTML = '👋 Рука зникла... Браслет сховано.';
                         braceletGroup.visible = false;
+                        // голограму не ховаємо, якщо вона зафіксована
                     }
                 }
             } catch(e) { showError("detectLoop: " + e.message); }
@@ -402,8 +404,7 @@
             requestAnimationFrame(animate);
             const now = performance.now() / 1000;
             
-            // Оновлюємо текстуру відео, якщо відео готове
-            if (videoReady && hologramGroup.visible) {
+            if (videoReady && hologramGroup.visible && !hologramVideo.paused) {
                 videoTexture.needsUpdate = true;
             }
             
@@ -418,10 +419,8 @@
                 pointLight.intensity = ringMat.emissiveIntensity * 0.9;
             }
             
-            // Анімація голограми
             if (hologramGroup.visible && hologramMaterial.uniforms) {
                 hologramMaterial.uniforms.uTime.value = now;
-                // Обертання частинок
                 particles.forEach((p, idx) => {
                     const angle = now * p.userData.speed + p.userData.angle;
                     p.position.x = Math.cos(angle) * p.userData.radius;
@@ -440,6 +439,7 @@
             hologramFixed = false;
             hologramGroup.visible = false;
             lastFistState = false;
+            // не зупиняємо відео, але ховаємо
             statusDiv.innerHTML = '👋 Скинуто. Покажіть руку і стисніть кулак для активації голограми.';
         };
 
