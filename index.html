@@ -1,23 +1,42 @@
-DOCTYPE html>
+
+<!DOCTYPE html>
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>НЕОН-БРАСЛЕТ | ДІАГНОСТИКА</title>
+    <title>НЕОН-БРАСЛЕТ | ЗАП'ЯСТЯ</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { overflow: hidden; font-family: monospace; background: black; }
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+        body { overflow: hidden; background: black; font-family: 'Courier New', monospace; }
         #video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
         #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        #info, #gesture-status, button { z-index: 100; position: absolute; }
-        #info { top: 20px; left: 20px; right: 20px; background: rgba(0,20,0,0.85); color: #0f0; padding: 12px; border-radius: 20px; text-align: center; border: 1px solid #0f0; }
-        #gesture-status { bottom: 30px; left: 20px; right: 20px; background: rgba(0,0,0,0.8); color: #ffdd88; padding: 10px; border-radius: 20px; text-align: center; border: 1px solid #ffaa33; }
-        button { bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); border: 2px solid #0f0; color: #0f0; padding: 8px 16px; border-radius: 40px; cursor: pointer; }
-        #sound-btn { bottom: 80px; }
-        #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: black; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; color: #0f0; }
+        #ui {
+            position: absolute; bottom: 20px; left: 20px; right: 20px;
+            background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+            border-radius: 20px; padding: 10px; z-index: 100;
+            color: #0f0; text-align: center; font-size: 14px;
+            border: 1px solid #0f0;
+        }
+        #status { color: #ffdd88; margin-bottom: 5px; }
+        button {
+            position: absolute; bottom: 20px; right: 20px;
+            background: rgba(0,0,0,0.7); border: 2px solid #0f0; color: #0f0;
+            padding: 8px 16px; border-radius: 40px; cursor: pointer; z-index: 200;
+            font-weight: bold;
+        }
+        #loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: black; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 1000;
+            color: #0f0; font-size: 1.2rem;
+        }
         .spinner { width: 50px; height: 50px; border: 3px solid #0f0; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        #error-log { position: fixed; bottom: 10px; left: 10px; right: 10px; background: rgba(255,0,0,0.8); color: white; padding: 8px; font-size: 10px; z-index: 200; border-radius: 8px; display: none; max-height: 150px; overflow-y: auto; font-family: monospace; }
+        #errorBox {
+            position: absolute; bottom: 80px; left: 20px; right: 20px;
+            background: rgba(255,0,0,0.8); color: white; padding: 10px;
+            border-radius: 10px; font-size: 12px; display: none; z-index: 1100;
+        }
     </style>
 </head>
 <body>
@@ -25,14 +44,14 @@ DOCTYPE html>
     <canvas id="canvas"></canvas>
     <div id="loading">
         <div class="spinner"></div>
-        <div id="loading-text">ЗАВАНТАЖЕННЯ...</div>
-        <div style="font-size:12px; margin-top:10px;">НЕОН-БРАСЛЕТ</div>
+        <div>ЗАВАНТАЖЕННЯ МАТРИЦІ...</div>
+        <div id="errorBox"></div>
     </div>
-    <div id="info">⚡ НЕОН-БРАСЛЕТ | МАТРИЦЯ КОДУ ⚡<br>✊ Стисни кулак – активуй голограму</div>
-    <div id="gesture-status">👋 Розкрий долоню → стисни в кулак</div>
-    <button id="reset-btn">⟳ СКИНУТИ</button>
-    <button id="sound-btn">🔇 ЗВУК</button>
-    <div id="error-log"></div>
+    <div id="ui">
+        <div id="status">👋 Шукаю руку...</div>
+        <div>✊ Стисни кулак → активувати голограму</div>
+    </div>
+    <button id="reset">⟳ Скинути</button>
 
     <script type="importmap">
         {
@@ -44,44 +63,38 @@ DOCTYPE html>
     </script>
 
     <script type="module">
-        // Перехоплення помилок
-        window.onerror = (msg, url, line, col, error) => {
-            const logDiv = document.getElementById('error-log');
-            logDiv.style.display = 'block';
-            logDiv.innerHTML += `[ERROR] ${msg}<br>`;
-            console.error(msg, error);
-        };
-        
+        // ---- ВІДЛАДКА ПОМИЛОК НА ЕКРАНІ ----
+        const errorBox = document.getElementById('errorBox');
+        function showError(msg) {
+            errorBox.style.display = 'block';
+            errorBox.innerHTML += `⚠️ ${msg}<br>`;
+            console.error(msg);
+            document.querySelector('#loading div:first-child + div').innerHTML = 'ПОМИЛКА: ' + msg;
+        }
+        window.onerror = (msg) => showError(msg);
+        window.onunhandledrejection = (e) => showError(e.reason?.message || String(e.reason));
+
         import * as THREE from 'three';
         import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 
+        // === НАЛАШТУВАННЯ ===
         const CONFIG = {
-            braceletColor: 0x00ff88,
+            braceletBaseRadius: 0.11,      // базовий радіус кільця (потім масштабується)
+            braceletTube: 0.025,           // товщина
             glowColor: 0x44ffaa,
-            rotationSpeed: 0.025,
-            handOffsetY: 0.05,
-            handOffsetZ: 0.03,
-            hologramOffsetY: 0.22,
-            hologramScale: 0.35,
-            neonIntensity: 1.2,
-            symbolCount: 16
+            handOffsetY: 0.02,             // зміщення вниз, щоб кільце було навколо зап'ястя
+            hologramOffsetY: 0.18,
+            hologramScale: 0.4,
+            rotationSpeed: 0.02
         };
 
-        const ukrSymbols = ['Є', 'Ї', 'Ґ', 'Щ', 'Ь', 'К', 'О', 'Д', '0', '1', '#', '{', '}', '<', '>', '⚡', '⌨️', '₴', '💻', '🔮', '☯', '∇', '∫', 'π'];
-
+        // Елементи DOM
         const videoEl = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const loadingDiv = document.getElementById('loading');
-        const loadingText = document.getElementById('loading-text');
-        
-        function logError(msg) {
-            const logDiv = document.getElementById('error-log');
-            logDiv.style.display = 'block';
-            logDiv.innerHTML += `⚠️ ${msg}<br>`;
-            console.error(msg);
-        }
+        const statusDiv = document.getElementById('status');
 
-        // Three.js
+        // ---- Three.js сцена ----
         const scene = new THREE.Scene();
         scene.background = null;
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -89,26 +102,230 @@ DOCTYPE html>
         const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setClearColor(0x000000, 0);
-        
+
+        // Група браслета (буде рухатись з рукою)
         const braceletGroup = new THREE.Group();
         scene.add(braceletGroup);
-        
-        // --- Спрощене створення браслета (для надійності) ---
-        const ringGeo = new THREE.TorusGeometry(0.13, 0.022, 64, 200);
-        const ringMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x44ffaa, emissiveIntensity: 1.2 });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        braceletGroup.add(ring);
-        
-        const glowRingGeo = new THREE.TorusGeometry(0.145, 0.006, 64, 200);
-        const glowRingMat = new THREE.MeshStandardMaterial({ color: 0x88ffaa, emissive: 0x88ff88, emissiveIntensity: 1.2 });
-        const glowRing = new THREE.Mesh(glowRingGeo, glowRingMat);
-        braceletGroup.add(glowRing);
-        
-        // Символи
-        const symbolGroup = new THREE.Group();
-        braceletGroup.add(symbolGroup);
-        function createSymbolTexture(char, color = '#0f0') {
-            const c = document.createElement('canvas');
-            c.width = 128; c.height = 128;
+
+        // ---- СТВОРЕННЯ БРАСЛЕТА (кільце, що масштабується) ----
+        const ringGeo = new THREE.TorusGeometry(CONFIG.braceletBaseRadius, CONFIG.braceletTube, 64, 120);
+        const ringMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x44ff88, emissiveIntensity: 1.2, metalness: 0.8 });
+        const mainRing = new THREE.Mesh(ringGeo, ringMat);
+        braceletGroup.add(mainRing);
+
+        // Додаткове тонке кільце (зовнішнє)
+        const outerRingGeo = new THREE.TorusGeometry(CONFIG.braceletBaseRadius + 0.008, 0.006, 64, 120);
+        const outerRingMat = new THREE.MeshStandardMaterial({ color: 0x88ffaa, emissive: 0x88ff88, emissiveIntensity: 1.0 });
+        const outerRing = new THREE.Mesh(outerRingGeo, outerRingMat);
+        braceletGroup.add(outerRing);
+
+        // Літаючі символи (для ефекту коду)
+        const symbolsGroup = new THREE.Group();
+        braceletGroup.add(symbolsGroup);
+        const ukrSymbols = ['Є', 'Ї', 'Ґ', 'Щ', 'К', 'О', 'Д', '0', '1', '#', '{', '}', '⚡', '∇'];
+        function makeSprite(char, color='#0f0') {
+            const c = document.createElement('canvas'); c.width = 64; c.height = 64;
             const ctx = c.getContext('2d');
-            ctx.fillStyle = 'black';
+            ctx.fillStyle = 'black'; ctx.fillRect(0,0,64,64);
+            ctx.font = 'bold 42px "Courier New"';
+            ctx.fillStyle = color; ctx.shadowBlur = 8; ctx.shadowColor = color;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(char, 32, 32);
+            const tex = new THREE.CanvasTexture(c);
+            const mat = new THREE.SpriteMaterial({ map: tex, blending: THREE.AdditiveBlending, transparent: true });
+            return new THREE.Sprite(mat);
+        }
+        const symbolCount = 12;
+        const symbolRadius = CONFIG.braceletBaseRadius + 0.03;
+        for (let i = 0; i < symbolCount; i++) {
+            const sprite = makeSprite(ukrSymbols[i % ukrSymbols.length], '#88ff88');
+            const angle = (i / symbolCount) * Math.PI * 2;
+            sprite.position.set(Math.cos(angle) * symbolRadius, 0, Math.sin(angle) * symbolRadius);
+            sprite.scale.set(0.045, 0.045, 1);
+            symbolsGroup.add(sprite);
+        }
+
+        // Світло
+        const pointLight = new THREE.PointLight(0x44ff88, 1.2, 2);
+        braceletGroup.add(pointLight);
+
+        // ---- ГОЛОГРАМА (красива заглушка, якщо немає відео) ----
+        const hologramGroup = new THREE.Group();
+        braceletGroup.add(hologramGroup);
+        // Площина з текстурою "ГОЛОГРАМА"
+        const canvasTex = document.createElement('canvas'); canvasTex.width = 512; canvasTex.height = 512;
+        const ctxTex = canvasTex.getContext('2d');
+        const hologramTexture = new THREE.CanvasTexture(canvasTex);
+        const hologramPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(CONFIG.hologramScale, CONFIG.hologramScale * 0.8),
+            new THREE.MeshStandardMaterial({ map: hologramTexture, emissive: 0x22aa22, emissiveIntensity: 0.6, transparent: true, side: THREE.DoubleSide })
+        );
+        hologramPlane.position.y = CONFIG.hologramOffsetY;
+        hologramGroup.add(hologramPlane);
+        // Анімація текстури
+        let hologramActive = false;
+        function updateHologramTexture(time) {
+            ctxTex.fillStyle = '#001100';
+            ctxTex.fillRect(0, 0, canvasTex.width, canvasTex.height);
+            ctxTex.font = `bold ${Math.floor(canvasTex.width * 0.1)}px "Courier New"`;
+            ctxTex.fillStyle = '#0f0';
+            ctxTex.shadowBlur = 10;
+            ctxTex.shadowColor = '#0f0';
+            ctxTex.textAlign = 'center';
+            ctxTex.fillText('⚡ ГОЛОГРАМА ⚡', canvasTex.width/2, canvasTex.height/2 - 40);
+            ctxTex.font = `${Math.floor(canvasTex.width * 0.06)}px monospace`;
+            ctxTex.fillStyle = '#8f8';
+            ctxTex.fillText('АКТИВОВАНО', canvasTex.width/2, canvasTex.height/2 + 40);
+            for (let i = 0; i < 30; i++) {
+                ctxTex.fillStyle = `rgba(0,255,0,${Math.random() * 0.5})`;
+                ctxTex.fillRect(Math.random() * canvasTex.width, Math.random() * canvasTex.height, 2, 2);
+            }
+            hologramTexture.needsUpdate = true;
+        }
+        hologramGroup.visible = false; // спочатку вимкнено
+
+        // ---- РОЗПІЗНАВАННЯ РУКИ (MediaPipe) ----
+        let handLandmarker = null;
+        let isHandVisible = false;
+        let wrist3D = { x: 0, y: 0, z: 0 };
+        let wristWidth = 0.12; // ширина зап'ястя для масштабу кільця
+
+        async function initMediaPipe() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+                return true;
+            } catch(e) { showError("MediaPipe: " + e.message); return false; }
+        }
+
+        // Функція для обчислення ширини зап'ястя (відстань між точками 0 і 17)
+        function getWristWidth(landmarks) {
+            const p0 = landmarks[0];  // основа долоні
+            const p17 = landmarks[17]; // зовнішній бік зап'ястя
+            const dx = p0.x - p17.x;
+            const dy = p0.y - p17.y;
+            const dz = (p0.z || 0) - (p17.z || 0);
+            return Math.sqrt(dx*dx + dy*dy + dz*dz) * 4.5; // коефіцієнт перерахунку в 3D-простір
+        }
+
+        // Запуск камери
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
+                videoEl.srcObject = stream;
+                await videoEl.play();
+                return true;
+            } catch(e) { showError("Камера: " + e.message); return false; }
+        }
+
+        // Основний цикл розпізнавання
+        function detectionLoop() {
+            if (!handLandmarker || videoEl.readyState < 2 || !videoEl.videoWidth) {
+                requestAnimationFrame(detectionLoop);
+                return;
+            }
+            try {
+                const results = handLandmarker.detectForVideo(videoEl, performance.now());
+                if (results.landmarks && results.landmarks.length > 0) {
+                    const lm = results.landmarks[0];
+                    isHandVisible = true;
+                    statusDiv.innerHTML = '🖐️ Рука виявлена! Браслет активовано.';
+                    
+                    // Центр зап'ястя (середина між точкою 0 і 17)
+                    const wristCenter = {
+                        x: (lm[0].x + lm[17].x) / 2,
+                        y: (lm[0].y + lm[17].y) / 2,
+                        z: ((lm[0].z || 0) + (lm[17].z || 0)) / 2
+                    };
+                    // Перетворення координат у 3D-простір (екранні координати)
+                    const targetX = (wristCenter.x - 0.5) * 4.5;
+                    const targetY = (0.5 - wristCenter.y) * 3.5 + CONFIG.handOffsetY;
+                    const targetZ = (wristCenter.z || 0) * 1.8;
+                    braceletGroup.position.x += (targetX - braceletGroup.position.x) * 0.5;
+                    braceletGroup.position.y += (targetY - braceletGroup.position.y) * 0.5;
+                    braceletGroup.position.z = targetZ;
+                    
+                    // Масштабування кільця під ширину зап'ястя
+                    const width = getWristWidth(lm);
+                    const scaleFactor = Math.min(Math.max(width / CONFIG.braceletBaseRadius, 0.7), 1.5);
+                    mainRing.scale.set(scaleFactor, scaleFactor, scaleFactor);
+                    outerRing.scale.set(scaleFactor, scaleFactor, scaleFactor);
+                    symbolsGroup.scale.set(scaleFactor, scaleFactor, scaleFactor);
+                    
+                    // Визначення жесту кулака для активації голограми
+                    const fingers = [8,12,16,20];
+                    let curled = 0;
+                    for (let tip of fingers) if (lm[tip].y > lm[tip-2].y + 0.02) curled++;
+                    const isFist = curled >= 3;
+                    
+                    if (isFist && !hologramGroup.visible) {
+                        hologramGroup.visible = true;
+                        statusDiv.innerHTML += ' | ✊ ГОЛОГРАМА АКТИВОВАНА';
+                        if (navigator.vibrate) navigator.vibrate(100);
+                    } else if (!isFist && hologramGroup.visible) {
+                        hologramGroup.visible = false;
+                        statusDiv.innerHTML = '🖐️ Рука виявлена! Браслет активовано.';
+                    }
+                    
+                    braceletGroup.visible = true;
+                } else {
+                    if (isHandVisible) {
+                        isHandVisible = false;
+                        statusDiv.innerHTML = '👋 Рука зникла...';
+                        braceletGroup.visible = false;
+                        hologramGroup.visible = false;
+                    }
+                }
+            } catch(e) { showError("detectLoop: " + e.message); }
+            requestAnimationFrame(detectionLoop);
+        }
+
+        // Анімація браслета та голограми
+        let lastTime = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            const now = performance.now() / 1000;
+            if (braceletGroup.visible) {
+                mainRing.rotation.y += CONFIG.rotationSpeed;
+                outerRing.rotation.y -= CONFIG.rotationSpeed * 0.8;
+                symbolsGroup.rotation.y += 0.015;
+                symbolsGroup.rotation.x = Math.sin(now) * 0.1;
+                pointLight.intensity = 0.8 + Math.sin(now * 8) * 0.4;
+                ringMat.emissiveIntensity = 0.9 + Math.sin(now * 6) * 0.3;
+                // Оновлення текстури голограми, якщо активна
+                if (hologramGroup.visible) {
+                    updateHologramTexture(now);
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        // Скидання
+        document.getElementById('reset').onclick = () => {
+            isHandVisible = false;
+            braceletGroup.visible = false;
+            hologramGroup.visible = false;
+            statusDiv.innerHTML = '👋 Скинуто. Покажіть руку.';
+        };
+
+        // Запуск
+        async function init() {
+            const mediapipeOk = await initMediaPipe();
+            const cameraOk = await startCamera();
+            if (mediapipeOk && cameraOk) {
+                braceletGroup.visible = false;
+                animate();
+                detectionLoop();
+                loadingDiv.style.display = 'none';
+            } else {
+                showError("Не вдалося ініціалізувати камеру або MediaPipe. Перевірте дозволи та інтернет.");
+            }
+        }
+        init();
+    </script>
+</body>
+</html>
