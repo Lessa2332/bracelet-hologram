@@ -3,66 +3,145 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Браслет Вартового + Голограма</title>
+    <title>НЕОН-БРАСЛЕТ | КОД ПРИРОДИ</title>
     <style>
-        body { margin: 0; overflow: hidden; font-family: 'Courier New', monospace; background: #0a2f0a; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            font-family: 'Courier New', 'Fira Code', monospace;
+            background: #000000;
+        }
+        #video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+            filter: contrast(1.05) brightness(1.02);
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
         #info {
             position: absolute;
             top: 20px;
             left: 20px;
             right: 20px;
-            background: rgba(0,20,0,0.8);
-            backdrop-filter: blur(10px);
-            color: #aaffaa;
+            background: rgba(0, 20, 0, 0.85);
+            backdrop-filter: blur(12px);
+            color: #0f0;
+            text-shadow: 0 0 5px #0f0;
             padding: 12px;
-            border-radius: 30px;
+            border-radius: 20px;
             text-align: center;
             z-index: 100;
-            border: 1px solid #88ff88;
+            border: 1px solid #0f0;
+            box-shadow: 0 0 15px rgba(0,255,0,0.3);
+            font-size: clamp(12px, 4vw, 16px);
+            letter-spacing: 1px;
         }
         #gesture-status {
             position: absolute;
             bottom: 30px;
             left: 20px;
             right: 20px;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.8);
             backdrop-filter: blur(8px);
             color: #ffdd88;
             padding: 10px;
             border-radius: 20px;
             text-align: center;
             z-index: 100;
+            font-family: monospace;
+            font-size: clamp(12px, 3.5vw, 14px);
+            border: 1px solid #ffaa33;
         }
         button {
             position: absolute;
             bottom: 20px;
             right: 20px;
-            background: rgba(0,0,0,0.6);
-            border: 2px solid #88ff88;
-            color: #88ff88;
+            background: rgba(0,0,0,0.7);
+            border: 2px solid #0f0;
+            color: #0f0;
             padding: 8px 16px;
             border-radius: 40px;
             cursor: pointer;
             z-index: 200;
+            font-weight: bold;
+            font-family: monospace;
+            backdrop-filter: blur(4px);
         }
         #sound-btn {
             bottom: 80px;
             right: 20px;
         }
+        button:active {
+            background: #0f0;
+            color: black;
+        }
+        #loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 1.5rem;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid #0f0;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+            box-shadow: 0 0 15px #0f0;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
         @media (max-width: 600px) {
-            #info { font-size: 12px; top: 10px; }
-            #gesture-status { font-size: 12px; bottom: 10px; }
+            #info { top: 10px; }
+            #gesture-status { bottom: 10px; }
         }
     </style>
 </head>
 <body>
-    <div id="info">
-        ⚡ КОД ПРИРОДИ: БРАСЛЕТ ⚡<br>
-        <span>Стисни кулак – активуй голограму гіда</span>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>ЗАВАНТАЖЕННЯ МАТРИЦІ...</div>
+        <div style="font-size:12px; margin-top:10px;">⌨️ НЕОН-БРАСЛЕТ | КОД ПРИРОДИ</div>
     </div>
-    <div id="gesture-status">👋 Покажи долоню, потім стисни кулак</div>
-    <button id="reset-btn">⟳ Скинути</button>
-    <button id="sound-btn">🔇 Увімкнути звук</button>
+    
+    <div id="info">
+        ⚡ НЕОН-БРАСЛЕТ | МАТРИЦЯ КОДУ ⚡<br>
+        <span>✊ Стисни кулак – активуй голограму</span>
+    </div>
+    <div id="gesture-status">👋 Розкрий долоню → стисни в кулак</div>
+    <button id="reset-btn">⟳ СКИНУТИ</button>
+    <button id="sound-btn">🔇 ЗВУК</button>
 
     <script type="importmap">
         {
@@ -77,42 +156,32 @@
         import * as THREE from 'three';
         import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 
-        // === НАЛАШТУВАННЯ ===
+        // === НАЛАШТУВАННЯ НЕОНУ ===
         const CONFIG = {
-            braceletColor: 0x44ff44,
-            glowColor: 0xaaff44,
-            goldColor: 0xffaa33,
-            rotationSpeed: 0.02,
+            braceletColor: 0x00ff88,
+            glowColor: 0x44ffaa,
+            rotationSpeed: 0.025,
             handOffsetY: 0.05,
             handOffsetZ: 0.03,
-            hologramOffsetY: 0.22,   // над браслетом
-            hologramScale: 0.35       // розмір відео
+            hologramOffsetY: 0.22,
+            hologramScale: 0.35,
+            neonIntensity: 1.2,
+            symbolCount: 16
         };
 
-        // === СТВОРЕННЯ ВІДЕОЕЛЕМЕНТА (КАМЕРА) ===
-        const videoEl = document.createElement('video');
-        videoEl.setAttribute('autoplay', '');
-        videoEl.setAttribute('playsinline', '');
-        videoEl.setAttribute('muted', true); // спочатку без звуку
-        videoEl.style.position = 'absolute';
-        videoEl.style.top = '0';
-        videoEl.style.left = '0';
-        videoEl.style.width = '100%';
-        videoEl.style.height = '100%';
-        videoEl.style.objectFit = 'cover';
-        videoEl.style.zIndex = '0';
-        document.body.appendChild(videoEl);
+        // Українські символи + код
+        const ukrSymbols = [
+            'Є', 'Ї', 'Ґ', 'Щ', 'Ь', 'К', 'О', 'Д', 
+            '0', '1', '#', '{', '}', '<', '>', '⚡', 
+            '⌨️', '₴', '💻', '🔮', '☯', '∇', '∫', 'π'
+        ];
 
-        const canvas = document.createElement('canvas');
-        canvas.style.position = 'absolute';
-        canvas.style.top = '0';
-        canvas.style.left = '0';
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-        canvas.style.zIndex = '1';
-        document.body.appendChild(canvas);
-
-        // Three.js сцена
+        // === ОТРИМУЄМО ЕЛЕМЕНТИ ===
+        const videoEl = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const loadingDiv = document.getElementById('loading');
+        
+        // === Three.js сцена ===
         const scene = new THREE.Scene();
         scene.background = null;
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -120,135 +189,160 @@
         const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setClearColor(0x000000, 0);
-
-        // === БРАСЛЕТ (група) ===
+        
+        // === БРАСЛЕТ-ГРУПА ===
         const braceletGroup = new THREE.Group();
         scene.add(braceletGroup);
         
-        // Основне кільце
-        const ringGeo = new THREE.TorusGeometry(0.12, 0.022, 64, 200);
-        const ringMat = new THREE.MeshStandardMaterial({ color: CONFIG.braceletColor, emissive: CONFIG.glowColor, emissiveIntensity: 0.7, metalness: 0.8 });
+        // ---- НЕОНОВЕ КІЛЬЦЕ (основне) ----
+        const ringGeo = new THREE.TorusGeometry(0.13, 0.022, 64, 200);
+        const ringMat = new THREE.MeshStandardMaterial({ 
+            color: CONFIG.braceletColor, 
+            emissive: CONFIG.glowColor, 
+            emissiveIntensity: CONFIG.neonIntensity, 
+            metalness: 0.9,
+            roughness: 0.2
+        });
         const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.isRing = true;
         braceletGroup.add(ring);
         
-        // Золоті сфери (орбіти)
-        const goldOrbs = [];
-        for (let i = 0; i < 6; i++) {
-            const orbGeo = new THREE.SphereGeometry(0.018, 16, 16);
-            const orbMat = new THREE.MeshStandardMaterial({ color: CONFIG.goldColor, emissive: 0xcc8800 });
-            const orb = new THREE.Mesh(orbGeo, orbMat);
-            const angle = (i / 6) * Math.PI * 2;
-            orb.position.set(Math.cos(angle) * 0.13, 0, Math.sin(angle) * 0.13);
-            braceletGroup.add(orb);
-            goldOrbs.push(orb);
-        }
-        
-        // Світний ореол
-        const glowGeo = new THREE.TorusGeometry(0.13, 0.008, 32, 100);
-        const glowMat = new THREE.MeshBasicMaterial({ color: 0x88ff88, transparent: true, opacity: 0.6 });
-        const glowRing = new THREE.Mesh(glowGeo, glowMat);
+        // ---- ДОДАТКОВЕ ТОНКЕ КІЛЬЦЕ (пульсуюче) ----
+        const glowRingGeo = new THREE.TorusGeometry(0.145, 0.006, 64, 200);
+        const glowRingMat = new THREE.MeshStandardMaterial({ color: 0x88ffaa, emissive: 0x88ff88, emissiveIntensity: 1.2 });
+        const glowRing = new THREE.Mesh(glowRingGeo, glowRingMat);
         braceletGroup.add(glowRing);
         
-        // Частинки
-        const particles = [];
-        for (let i = 0; i < 40; i++) {
-            const pGeo = new THREE.SphereGeometry(0.006, 6, 6);
-            const pMat = new THREE.MeshStandardMaterial({ color: 0xffdd88, emissive: 0xffaa44 });
-            const p = new THREE.Mesh(pGeo, pMat);
-            braceletGroup.add(p);
-            particles.push(p);
+        // ---- СИМВОЛИ КОДУ (обертаються навколо) ----
+        const symbolGroup = new THREE.Group();
+        braceletGroup.add(symbolGroup);
+        
+        // Створюємо текстури для символів
+        function createSymbolTexture(char, color = '#00ffcc') {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = `bold ${Math.floor(canvas.width * 0.7)}px 'Courier New', monospace`;
+            ctx.fillStyle = color;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(char, canvas.width/2, canvas.height/2);
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
         }
         
-        const light = new THREE.PointLight(0xaaffaa, 0.8, 2);
-        braceletGroup.add(light);
+        const symbols = [];
+        const radius = 0.19;
+        for (let i = 0; i < CONFIG.symbolCount; i++) {
+            const char = ukrSymbols[i % ukrSymbols.length];
+            const texture = createSymbolTexture(char, '#0f0');
+            const material = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+            const sprite = new THREE.Sprite(material);
+            const angle = (i / CONFIG.symbolCount) * Math.PI * 2;
+            sprite.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+            sprite.scale.set(0.055, 0.055, 1);
+            symbolGroup.add(sprite);
+            symbols.push(sprite);
+        }
         
-        // === ГОЛОГРАМА: ВІДЕО З ХРОМАКЕЄМ ===
-        // Завантажуємо відео персонажа (наприклад, "hologram_guide.mp4" з зеленим фоном)
+        // ---- ЧАСТИНКИ "МАТРИЦЯ" (падаючі символи) ----
+        const matrixParticles = [];
+        const particleCount = 60;
+        for (let i = 0; i < particleCount; i++) {
+            const char = ukrSymbols[Math.floor(Math.random() * ukrSymbols.length)];
+            const texture = createSymbolTexture(char, '#88ff88');
+            const material = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
+            const particle = new THREE.Sprite(material);
+            particle.userData = {
+                speedY: 0.005 + Math.random() * 0.015,
+                radius: 0.22 + Math.random() * 0.08,
+                angle: Math.random() * Math.PI * 2,
+                yOffset: Math.random() * 0.5
+            };
+            particle.scale.set(0.035, 0.035, 1);
+            braceletGroup.add(particle);
+            matrixParticles.push(particle);
+        }
+        
+        // ---- ДОДАТКОВЕ СВІТЛО ----
+        const neonLight = new THREE.PointLight(0x44ff88, 1.0, 2.5);
+        neonLight.intensity = 1.2;
+        braceletGroup.add(neonLight);
+        
+        // ---- ДРУГЕ КІЛЬЦЕ З ЦИФРАМИ (для ефекту коду) ----
+        const codeRingGeo = new THREE.TorusGeometry(0.16, 0.008, 48, 120);
+        const codeRingMat = new THREE.MeshStandardMaterial({ color: 0x00ccaa, emissive: 0x00ffaa, emissiveIntensity: 0.8 });
+        const codeRing = new THREE.Mesh(codeRingGeo, codeRingMat);
+        braceletGroup.add(codeRing);
+        
+        // === ГОЛОГРАМА (залишаємо без змін) ===
         const videoTexture = new THREE.VideoTexture();
         const hologramVideo = document.createElement('video');
         hologramVideo.setAttribute('loop', '');
         hologramVideo.setAttribute('playsinline', '');
         hologramVideo.muted = true;
-        // Вкажи шлях до свого відео (персонаж на зеленому фоні)
-        hologramVideo.src = 'assets/video/guide_hologram.mp4'; // Заміни на свій файл
+        // ⚠️ ЗАМІНІТЬ ШЛЯХ, ЯКЩО ВІДЕО ВІДСУТНЄ. ТЕСТОВЕ: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
+        hologramVideo.src = 'assets/video/guide_hologram.mp4';
         hologramVideo.load();
         videoTexture.image = hologramVideo;
-        videoTexture.needsUpdate = true;
         
-        // Шейдер для видалення зеленого фону (хромакей) + голографічний ефект
         const vertexShader = `
             varying vec2 vUv;
             void main() {
                 vUv = uv;
-                gl_PointSize = 1.0;
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }
         `;
-        
         const fragmentShader = `
             uniform sampler2D uVideo;
             uniform float uTime;
             varying vec2 vUv;
-            
             void main() {
                 vec4 color = texture2D(uVideo, vUv);
-                // Хромакей: видаляємо зелений (діапазон)
                 float chromaKey = 0.0;
                 float r = color.r;
                 float g = color.g;
                 float b = color.b;
-                if (g > 0.3 && r < 0.4 && b < 0.4) {
-                    chromaKey = 1.0; // прозорий
-                }
+                if (g > 0.3 && r < 0.4 && b < 0.4) chromaKey = 1.0;
                 float alpha = 1.0 - chromaKey;
-                // Голографічний ефект: напівпрозорість + шум + зсув
                 float noise = fract(sin(vUv.x * 500.0 + vUv.y * 300.0 + uTime) * 43758.5453);
-                vec3 hologramColor = vec3(0.2, 0.9, 0.2); // зелений відтінок
+                vec3 hologramColor = vec3(0.2, 0.9, 0.2);
                 vec3 finalColor = mix(color.rgb, hologramColor, 0.5);
                 finalColor += noise * 0.2;
-                // Скануючі лінії
                 float scanline = sin(vUv.y * 400.0 + uTime * 5.0) * 0.15;
                 finalColor += scanline;
                 gl_FragColor = vec4(finalColor, alpha * 0.85);
             }
         `;
-        
         const videoMaterial = new THREE.ShaderMaterial({
-            uniforms: {
-                uVideo: { value: videoTexture },
-                uTime: { value: 0 }
-            },
-            vertexShader: vertexShader,
-            fragmentShader: fragmentShader,
-            transparent: true,
-            side: THREE.DoubleSide
+            uniforms: { uVideo: { value: videoTexture }, uTime: { value: 0 } },
+            vertexShader, fragmentShader, transparent: true, side: THREE.DoubleSide
         });
-        
-        const planeGeo = new THREE.PlaneGeometry(CONFIG.hologramScale, CONFIG.hologramScale * (hologramVideo.videoHeight / hologramVideo.videoWidth || 0.75));
+        const planeGeo = new THREE.PlaneGeometry(CONFIG.hologramScale, CONFIG.hologramScale * 0.75);
         const hologramPlane = new THREE.Mesh(planeGeo, videoMaterial);
         hologramPlane.position.y = CONFIG.hologramOffsetY;
         braceletGroup.add(hologramPlane);
         
-        // Запускаємо відео, коли воно завантажилось
         hologramVideo.addEventListener('canplay', () => {
-            hologramVideo.play().catch(e => console.log("Автовідтворення заблоковане", e));
-            // Оновлюємо геометрію під реальні пропорції відео
-            const aspect = hologramVideo.videoWidth / hologramVideo.videoHeight;
-            const newWidth = CONFIG.hologramScale;
-            const newHeight = newWidth / aspect;
-            hologramPlane.scale.set(newWidth / planeGeo.parameters.width, newHeight / planeGeo.parameters.height, 1);
+            if (hologramVideo.videoWidth && hologramVideo.videoHeight) {
+                const aspect = hologramVideo.videoWidth / hologramVideo.videoHeight;
+                const newWidth = CONFIG.hologramScale;
+                const newHeight = newWidth / aspect;
+                hologramPlane.scale.set(newWidth / planeGeo.parameters.width, newHeight / planeGeo.parameters.height, 1);
+            }
+            hologramVideo.play().catch(e => console.log);
         });
         
-        // === РОЗПІЗНАВАННЯ РУКИ ===
+        // === РОЗПІЗНАВАННЯ РУКИ (MediaPipe) ===
         let handLandmarker;
         let isFist = false;
-        let fistDetectedOnce = false;
         
         async function initHandTracking() {
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-            );
+            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
             handLandmarker = await HandLandmarker.createFromOptions(vision, {
                 baseOptions: {
                     modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
@@ -275,15 +369,16 @@
                     video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
                 });
                 videoEl.srcObject = stream;
-                await new Promise(resolve => videoEl.onloadedmetadata = () => { videoEl.play(); resolve(); });
+                await videoEl.play();
+                loadingDiv.style.display = 'none';
             } catch (err) {
-                document.getElementById('gesture-status').innerHTML = '❌ Помилка камери. Дозволь доступ.';
+                document.getElementById('gesture-status').innerHTML = '❌ ПОМИЛКА КАМЕРИ. ДОЗВОЛЬТЕ ДОСТУП.';
+                loadingDiv.innerHTML = '<div>❌ НЕ ВДАЛОСЯ ЗАПУСТИТИ КАМЕРУ</div>';
             }
         }
         
-        // Основний цикл розпізнавання
         function detectLoop() {
-            if (!handLandmarker || videoEl.readyState < 2) {
+            if (!handLandmarker || videoEl.readyState < 2 || !videoEl.videoWidth) {
                 requestAnimationFrame(detectLoop);
                 return;
             }
@@ -295,20 +390,18 @@
                 if (fistNow !== isFist) {
                     isFist = fistNow;
                     if (isFist) {
-                        statusDiv.innerHTML = '✊ КУЛАК! Браслет і голограма активовані ✨';
+                        statusDiv.innerHTML = '✊ КУЛАК АКТИВОВАНО | НЕОН-БРАСЛЕТ + ГОЛОГРАМА ✨';
                         braceletGroup.visible = true;
                         hologramPlane.visible = true;
                         if (navigator.vibrate) navigator.vibrate(100);
-                        // Відео голограми починає грати (якщо ще не грає)
                         if (hologramVideo.paused) hologramVideo.play().catch(e=>console.log);
                     } else {
-                        statusDiv.innerHTML = '👋 Розтисни кулак – браслет і голограма зникнуть';
+                        statusDiv.innerHTML = '👋 РОЗТИСНИ КУЛАК – БРАСЛЕТ ЗНИКНЕ';
                         braceletGroup.visible = false;
                         hologramPlane.visible = false;
                         hologramVideo.pause();
                     }
                 }
-                // Оновлення позиції браслета (і голограма слідує за ним)
                 if (isFist && braceletGroup.visible) {
                     const wrist = landmarks[0];
                     const x = (wrist.x - 0.5) * 4.5;
@@ -319,34 +412,43 @@
                     braceletGroup.position.z = z;
                 }
             } else {
-                if (isFist) statusDiv.innerHTML = '🖐️ Рука зникла. Покажи знову.';
+                if (isFist) statusDiv.innerHTML = '🖐️ РУКА ЗНИКЛА. ПОКАЖІТЬ ЗНОВУ.';
             }
             requestAnimationFrame(detectLoop);
         }
         
-        // Анімація браслета та голограми
-        let lastTime = 0;
+        // === АНІМАЦІЯ НЕОНУ ТА МАТРИЦІ ===
         function animate() {
             requestAnimationFrame(animate);
             const now = performance.now() / 1000;
             if (braceletGroup.visible) {
+                // Обертання основного кільця
                 ring.rotation.y += CONFIG.rotationSpeed;
-                goldOrbs.forEach((orb, idx) => {
-                    const angle = now * 2 + idx;
-                    orb.position.x = Math.cos(angle) * 0.13;
-                    orb.position.z = Math.sin(angle) * 0.13;
-                });
-                particles.forEach((p, i) => {
-                    const rad = 0.14 + Math.sin(now * 3 + i) * 0.01;
-                    const ang = now * 2 + i;
+                glowRing.rotation.y -= CONFIG.rotationSpeed * 0.7;
+                codeRing.rotation.z += 0.01;
+                codeRing.rotation.x = Math.sin(now) * 0.2;
+                // Обертання символів навколо
+                symbolGroup.rotation.y += 0.02;
+                symbolGroup.rotation.x = Math.sin(now * 1.5) * 0.1;
+                // Пульсація світла
+                const intensity = 0.9 + Math.sin(now * 8) * 0.5;
+                neonLight.intensity = intensity;
+                ringMat.emissiveIntensity = 0.8 + Math.sin(now * 5) * 0.4;
+                glowRingMat.emissiveIntensity = 0.7 + Math.sin(now * 6) * 0.5;
+                // Анімація матричних частинок (падають)
+                matrixParticles.forEach(p => {
+                    p.userData.yOffset += p.userData.speedY;
+                    if (p.userData.yOffset > 0.35) p.userData.yOffset = -0.25;
+                    const y = p.userData.yOffset;
+                    const rad = p.userData.radius;
+                    const ang = p.userData.angle + now * 0.5;
                     p.position.x = Math.cos(ang) * rad;
                     p.position.z = Math.sin(ang) * rad;
-                    p.position.y = Math.sin(ang * 2) * 0.02;
+                    p.position.y = y;
+                    // Змінюємо прозорість
+                    p.material.opacity = 0.3 + Math.sin(now * 3) * 0.2;
                 });
-                light.intensity = 0.7 + Math.sin(now * 6) * 0.3;
-                glowMat.opacity = 0.5 + Math.sin(now * 8) * 0.2;
             }
-            // Оновлюємо час для шейдера голограми
             if (hologramPlane.visible && videoMaterial.uniforms) {
                 videoMaterial.uniforms.uTime.value = now;
                 if (videoTexture.image && videoTexture.image.readyState >= 2) videoTexture.needsUpdate = true;
@@ -360,19 +462,13 @@
             braceletGroup.visible = false;
             hologramPlane.visible = false;
             hologramVideo.pause();
-            document.getElementById('gesture-status').innerHTML = '👋 Скинуто. Покажи долоню → стисни кулак';
+            document.getElementById('gesture-status').innerHTML = '👋 СКИНУТО. ПОКАЖИ ДОЛОНЮ → СТИСНИ КУЛАК';
         });
         
         const soundBtn = document.getElementById('sound-btn');
-        let soundEnabled = false;
         soundBtn.addEventListener('click', () => {
-            if (hologramVideo.muted) {
-                hologramVideo.muted = false;
-                soundBtn.innerHTML = '🔊 Вимкнути звук';
-            } else {
-                hologramVideo.muted = true;
-                soundBtn.innerHTML = '🔇 Увімкнути звук';
-            }
+            hologramVideo.muted = !hologramVideo.muted;
+            soundBtn.innerHTML = hologramVideo.muted ? '🔇 ЗВУК' : '🔊 ЗВУК';
         });
         
         // === ЗАПУСК ===
