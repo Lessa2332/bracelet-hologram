@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>НЕОН-БРАСЛЕТ | ГОЛОГРАМА З ВІДЕО</title>
+    <title>НЕОН-БРАСЛЕТ | ЧИСТА ВЕРСІЯ</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
         body { overflow: hidden; background: black; font-family: 'Courier New', monospace; }
@@ -12,20 +11,20 @@
         #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
         #ui {
             position: absolute; bottom: 20px; left: 20px; right: 20px;
-            background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
             border-radius: 20px; padding: 10px; z-index: 100;
             color: #0f0; text-align: center; font-size: 14px;
             border: 1px solid #0f0;
         }
         #status { color: #ffdd88; margin-bottom: 5px; }
         button {
-            position: absolute;
             background: rgba(0,0,0,0.7); border: 2px solid #0f0; color: #0f0;
-            padding: 8px 16px; border-radius: 40px; cursor: pointer; z-index: 200;
-            font-weight: bold;
+            padding: 8px 16px; border-radius: 40px; cursor: pointer;
+            font-weight: bold; font-family: monospace;
         }
-        #reset { bottom: 20px; right: 20px; }
-        #playVideoBtn { bottom: 20px; left: 20px; }
+        #reset { position: absolute; bottom: 20px; right: 20px; z-index: 200; }
+        #camera-toggle { position: absolute; bottom: 20px; left: 20px; z-index: 200; }
+        #play-video { position: absolute; top: 20px; right: 20px; z-index: 200; display: none; }
         #loading {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: black; display: flex; flex-direction: column;
@@ -34,11 +33,6 @@
         }
         .spinner { width: 50px; height: 50px; border: 3px solid #0f0; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        #errorBox {
-            position: absolute; bottom: 80px; left: 20px; right: 20px;
-            background: rgba(255,0,0,0.8); color: white; padding: 10px;
-            border-radius: 10px; font-size: 12px; display: none; z-index: 1100;
-        }
     </style>
 </head>
 <body>
@@ -46,15 +40,15 @@
     <canvas id="canvas"></canvas>
     <div id="loading">
         <div class="spinner"></div>
-        <div>ЗАВАНТАЖЕННЯ МАТРИЦІ...</div>
-        <div id="errorBox"></div>
+        <div>ЗАВАНТАЖЕННЯ...</div>
     </div>
     <div id="ui">
-        <div id="status">👋 Шукаю руку...</div>
-        <div>✊ Стисни кулак → активувати голограму (фіксується)</div>
+        <div id="status">👋 Покажіть долоню</div>
+        <div>✊ Стисніть кулак → голограма</div>
     </div>
     <button id="reset">⟳ Скинути</button>
-    <button id="playVideoBtn">▶ Запустити відео</button>
+    <button id="camera-toggle">📷 Змінити камеру</button>
+    <button id="play-video">🎬 Запустити відео</button>
 
     <script type="importmap">
         {
@@ -66,17 +60,6 @@
     </script>
 
     <script type="module">
-        // ---- ВІДЛАДКА ----
-        const errorBox = document.getElementById('errorBox');
-        function showError(msg) {
-            errorBox.style.display = 'block';
-            errorBox.innerHTML += `⚠️ ${msg}<br>`;
-            console.error(msg);
-            document.querySelector('#loading div:first-child + div').innerHTML = 'ПОМИЛКА: ' + msg;
-        }
-        window.onerror = (msg) => showError(msg);
-        window.onunhandledrejection = (e) => showError(e.reason?.message || String(e.reason));
-
         import * as THREE from 'three';
         import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 
@@ -87,7 +70,7 @@
             handOffsetY: 0.02,
             hologramOffsetY: 0.25,
             hologramScale: 0.9,
-            rotationSpeed: 0.002,
+            rotationSpeed: 0.001,   // майже нерухоме
             glowIdle: 0.3,
             glowActive: 1.2
         };
@@ -96,6 +79,9 @@
         const canvas = document.getElementById('canvas');
         const loadingDiv = document.getElementById('loading');
         const statusDiv = document.getElementById('status');
+        const resetBtn = document.getElementById('reset');
+        const cameraToggleBtn = document.getElementById('camera-toggle');
+        const playVideoBtn = document.getElementById('play-video');
 
         // ---- Three.js сцена ----
         const scene = new THREE.Scene();
@@ -110,15 +96,16 @@
         const braceletGroup = new THREE.Group();
         scene.add(braceletGroup);
 
-        // ---- БРАСЛЕТ: дуга (тільки передня частина) ----
-        const ringGeo = new THREE.TorusGeometry(
-            CONFIG.braceletBaseRadius, 
-            CONFIG.braceletTube, 
+        // ---- БРАСЛЕТ: два напівкільця (дуги) без символів ----
+        // Внутрішнє кільце
+        const innerRingGeo = new THREE.TorusGeometry(
+            CONFIG.braceletBaseRadius - 0.008, 
+            CONFIG.braceletTube * 0.8, 
             64, 
             72, 
             Math.PI * 0.7
         );
-        const ringMat = new THREE.MeshStandardMaterial({ 
+        const innerRingMat = new THREE.MeshStandardMaterial({ 
             color: 0x00ff88, 
             emissive: 0x44ff88, 
             emissiveIntensity: CONFIG.glowIdle,
@@ -127,12 +114,12 @@
             opacity: 0.95,
             depthWrite: false
         });
-        const mainRing = new THREE.Mesh(ringGeo, ringMat);
-        braceletGroup.add(mainRing);
+        const innerRing = new THREE.Mesh(innerRingGeo, innerRingMat);
+        braceletGroup.add(innerRing);
 
-        // Зовнішнє тонке кільце (дуга)
+        // Зовнішнє кільце (тонше)
         const outerRingGeo = new THREE.TorusGeometry(
-            CONFIG.braceletBaseRadius + 0.012, 
+            CONFIG.braceletBaseRadius + 0.008, 
             0.008, 
             64, 
             72, 
@@ -149,32 +136,7 @@
         const outerRing = new THREE.Mesh(outerRingGeo, outerRingMat);
         braceletGroup.add(outerRing);
 
-        // Символи (тільки передня дуга)
-        const symbolsGroup = new THREE.Group();
-        braceletGroup.add(symbolsGroup);
-        const ukrSymbols = ['Є', 'Ї', 'Ґ', 'Щ', 'К', 'О', 'Д', '0', '1', '#', '{', '}', '⚡', '∇'];
-        function makeSprite(char, color='#0f0') {
-            const c = document.createElement('canvas'); c.width = 96; c.height = 96;
-            const ctx = c.getContext('2d');
-            ctx.fillStyle = 'black'; ctx.fillRect(0,0,96,96);
-            ctx.font = 'bold 64px "Courier New"';
-            ctx.fillStyle = color; ctx.shadowBlur = 10; ctx.shadowColor = color;
-            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(char, 48, 48);
-            const tex = new THREE.CanvasTexture(c);
-            const mat = new THREE.SpriteMaterial({ map: tex, blending: THREE.AdditiveBlending, transparent: true });
-            return new THREE.Sprite(mat);
-        }
-        const symbolCount = 10;
-        const symbolRadius = CONFIG.braceletBaseRadius + 0.05;
-        for (let i = 0; i < symbolCount; i++) {
-            const sprite = makeSprite(ukrSymbols[i % ukrSymbols.length], '#88ff88');
-            const angle = -Math.PI/2 + (i / symbolCount) * Math.PI * 0.9;
-            sprite.position.set(Math.cos(angle) * symbolRadius, 0, Math.sin(angle) * symbolRadius);
-            sprite.scale.set(0.07, 0.07, 1);
-            symbolsGroup.add(sprite);
-        }
-
+        // Світло
         const pointLight = new THREE.PointLight(0x44ff88, CONFIG.glowIdle, 2);
         braceletGroup.add(pointLight);
 
@@ -182,23 +144,21 @@
         const hologramGroup = new THREE.Group();
         braceletGroup.add(hologramGroup);
         
-        // Завантажуємо відео для голограми
         const hologramVideo = document.createElement('video');
         hologramVideo.setAttribute('loop', '');
         hologramVideo.setAttribute('playsinline', '');
-        hologramVideo.muted = false;  // дозволяємо звук, але браузер може блокувати
+        hologramVideo.muted = false;   // зі звуком
         hologramVideo.src = 'assets/video/guide_hologram.mp4';
         hologramVideo.load();
         
         const videoTexture = new THREE.VideoTexture(hologramVideo);
         videoTexture.minFilter = THREE.LinearFilter;
         
-        // Покращений шейдер для хромакею
+        // Шейдер хромакею (HSV)
         const vertexShader = `
             varying vec2 vUv;
             void main() {
                 vUv = uv;
-                gl_PointSize = 1.0;
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }
         `;
@@ -235,11 +195,7 @@
         
         const hologramMaterial = new THREE.ShaderMaterial({
             uniforms: { uVideo: { value: videoTexture }, uTime: { value: 0 } },
-            vertexShader: vertexShader,
-            fragmentShader: fragmentShader,
-            transparent: true,
-            side: THREE.DoubleSide,
-            depthWrite: false
+            vertexShader, fragmentShader, transparent: true, side: THREE.DoubleSide, depthWrite: false
         });
         
         const hologramPlane = new THREE.Mesh(
@@ -249,73 +205,76 @@
         hologramPlane.position.y = CONFIG.hologramOffsetY;
         hologramGroup.add(hologramPlane);
         
-        // Обробка подій відео
-        let videoReady = false;
-        hologramVideo.addEventListener('loadeddata', () => {
-            console.log('Відео завантажено, розмір:', hologramVideo.videoWidth, hologramVideo.videoHeight);
+        // Оновлення пропорцій після завантаження відео
+        hologramVideo.addEventListener('loadedmetadata', () => {
             const aspect = hologramVideo.videoWidth / hologramVideo.videoHeight;
             const newWidth = CONFIG.hologramScale;
             const newHeight = newWidth / aspect;
             hologramPlane.scale.set(newWidth, newHeight, 1);
-            videoReady = true;
         });
-        hologramVideo.addEventListener('error', (e) => showError('Помилка відео: ' + e.message));
         
-        // Кнопка запуску відео (бо автовідтворення блокується)
-        const playBtn = document.getElementById('playVideoBtn');
-        playBtn.addEventListener('click', () => {
+        // Спроба автовідтворення, якщо заблоковано – показуємо кнопку
+        let videoPlayAttempted = false;
+        function tryPlayVideo() {
             hologramVideo.play().then(() => {
-                console.log('Відео запущено');
-                playBtn.style.display = 'none';
-            }).catch(e => showError('Не вдалося запустити відео: ' + e.message));
-        });
+                playVideoBtn.style.display = 'none';
+                videoPlayAttempted = true;
+            }).catch(e => {
+                console.warn("Автовідтворення заблоковано:", e);
+                playVideoBtn.style.display = 'block';
+            });
+        }
+        hologramVideo.addEventListener('canplay', tryPlayVideo);
+        playVideoBtn.onclick = () => {
+            hologramVideo.play().catch(e => console.error(e));
+            playVideoBtn.style.display = 'none';
+        };
         
         hologramGroup.visible = false;
-        let hologramFixed = false;   // чи активована голограма (кулаком)
+        let hologramActive = false;      // чи активована голограма кулаком
+        let handVisible = false;
+        let fistState = false;
+        let lastFistState = false;
         
-        // Декоративні частинки
+        // Декоративні частинки навколо голограми (замість букв)
         const particlesGroup = new THREE.Group();
         hologramGroup.add(particlesGroup);
-        const particleCount = 25;
-        const particles = [];
+        const particleCount = 20;
         for (let i = 0; i < particleCount; i++) {
             const geom = new THREE.SphereGeometry(0.008, 6, 6);
             const mat = new THREE.MeshStandardMaterial({ color: 0x44ff44, emissive: 0x88ff88, emissiveIntensity: 0.5 });
             const particle = new THREE.Mesh(geom, mat);
-            particle.userData = { angle: (i / particleCount) * Math.PI * 2, radius: 0.6, speed: 0.4 + Math.random() * 0.6 };
+            particle.userData = { angle: (i / particleCount) * Math.PI * 2, radius: 0.6, speed: 0.3 + Math.random() * 0.5 };
             particlesGroup.add(particle);
-            particles.push(particle);
         }
-
+        
         // ---- РОЗПІЗНАВАННЯ РУКИ (MediaPipe) ----
         let handLandmarker = null;
-        let isHandVisible = false;
-        let lastFistState = false;
-
+        let currentFacingMode = 'environment';
+        
         async function initMediaPipe() {
-            try {
-                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
-                handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
-                    runningMode: "VIDEO",
-                    numHands: 1
-                });
-                return true;
-            } catch(e) { showError("MediaPipe: " + e.message); return false; }
+            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
+                runningMode: "VIDEO",
+                numHands: 1
+            });
         }
-
+        
         function getWristWidth(landmarks) {
-            const p0 = landmarks[0];
-            const p17 = landmarks[17];
-            const dx = p0.x - p17.x;
-            const dy = p0.y - p17.y;
-            const dz = (p0.z || 0) - (p17.z || 0);
+            const p0 = landmarks[0], p17 = landmarks[17];
+            const dx = p0.x - p17.x, dy = p0.y - p17.y, dz = (p0.z||0) - (p17.z||0);
             return Math.sqrt(dx*dx + dy*dy + dz*dz) * 5.5;
         }
-
+        
         async function startCamera() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
+                if (videoEl.srcObject) {
+                    videoEl.srcObject.getTracks().forEach(t => t.stop());
+                }
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
                 videoEl.srcObject = stream;
                 await videoEl.play();
                 videoEl.onloadedmetadata = () => {
@@ -325,137 +284,129 @@
                     renderer.setSize(window.innerWidth, window.innerHeight);
                 };
                 return true;
-            } catch(e) { showError("Камера: " + e.message); return false; }
+            } catch(e) {
+                console.error("Camera error:", e);
+                statusDiv.innerHTML = '❌ Помилка камери. Спробуйте іншу.';
+                return false;
+            }
         }
-
+        
+        // Основний цикл
         function detectionLoop() {
             if (!handLandmarker || videoEl.readyState < 2 || !videoEl.videoWidth) {
                 requestAnimationFrame(detectionLoop);
                 return;
             }
-            try {
-                const results = handLandmarker.detectForVideo(videoEl, performance.now());
-                if (results.landmarks && results.landmarks.length > 0) {
-                    const lm = results.landmarks[0];
-                    isHandVisible = true;
+            const results = handLandmarker.detectForVideo(videoEl, performance.now());
+            if (results.landmarks && results.landmarks.length > 0) {
+                const lm = results.landmarks[0];
+                if (!handVisible) {
+                    handVisible = true;
                     statusDiv.innerHTML = '🖐️ Рука виявлена! Браслет активовано.';
-                    
-                    // Центр зап'ястя
-                    const wristCenter = {
-                        x: (lm[0].x + lm[17].x) / 2,
-                        y: (lm[0].y + lm[17].y) / 2,
-                        z: ((lm[0].z || 0) + (lm[17].z || 0)) / 2
-                    };
-                    const targetX = (wristCenter.x - 0.5) * 2.6;
-                    const targetY = (0.5 - wristCenter.y) * 2.0 + CONFIG.handOffsetY;
-                    const targetZ = (wristCenter.z || 0) * 0.6 + 0.08;
-                    
-                    braceletGroup.position.x += (targetX - braceletGroup.position.x) * 0.12;
-                    braceletGroup.position.y += (targetY - braceletGroup.position.y) * 0.12;
-                    braceletGroup.position.z = targetZ;
-                    
-                    const width = getWristWidth(lm);
-                    let scaleFactor = width / CONFIG.braceletBaseRadius;
-                    scaleFactor = Math.min(Math.max(scaleFactor, 0.7), 1.5);
-                    mainRing.scale.set(scaleFactor, scaleFactor, scaleFactor);
-                    outerRing.scale.set(scaleFactor, scaleFactor, scaleFactor);
-                    symbolsGroup.scale.set(scaleFactor, scaleFactor, scaleFactor);
-                    
-                    // Визначення кулака
-                    const fingers = [8,12,16,20];
-                    let curled = 0;
-                    for (let tip of fingers) if (lm[tip].y > lm[tip-2].y + 0.02) curled++;
-                    const isFist = curled >= 3;
-                    
-                    // ГОЛОГРАМА АКТИВУЄТЬСЯ ПРИ ПЕРШОМУ СТИСКАННІ (і більше ніколи)
-                    if (isFist && !lastFistState && !hologramFixed) {
-                        hologramFixed = true;
-                        hologramGroup.visible = true;
-                        statusDiv.innerHTML += ' | ✨ ГОЛОГРАМА ЗАФІКСОВАНА ✨';
-                        if (navigator.vibrate) navigator.vibrate(100);
-                        // Якщо відео ще не запущене, пропонуємо кнопку (або запускаємо автоматично?)
-                        if (hologramVideo.paused && videoReady) {
-                            // спробуємо автоматично, але може бути заблоковано
-                            hologramVideo.play().catch(e => console.log("Автовідтворення заблоковано, натисніть кнопку"));
-                        }
-                    }
-                    lastFistState = isFist;
-                    
-                    // Якщо голограма зафіксована, вона залишається видимою
-                    if (hologramFixed && !hologramGroup.visible) {
-                        hologramGroup.visible = true;
-                    }
-                    
-                    braceletGroup.visible = true;
-                } else {
-                    if (isHandVisible) {
-                        isHandVisible = false;
-                        statusDiv.innerHTML = '👋 Рука зникла... Браслет сховано.';
-                        braceletGroup.visible = false;
-                        // голограму не ховаємо, якщо вона зафіксована
-                    }
                 }
-            } catch(e) { showError("detectLoop: " + e.message); }
+                // Центр зап'ястя
+                const wristCenter = {
+                    x: (lm[0].x + lm[17].x) / 2,
+                    y: (lm[0].y + lm[17].y) / 2,
+                    z: ((lm[0].z||0) + (lm[17].z||0)) / 2
+                };
+                const targetX = (wristCenter.x - 0.5) * 2.6;
+                const targetY = (0.5 - wristCenter.y) * 2.0 + CONFIG.handOffsetY;
+                const targetZ = (wristCenter.z||0) * 0.6 + 0.08;
+                braceletGroup.position.x += (targetX - braceletGroup.position.x) * 0.12;
+                braceletGroup.position.y += (targetY - braceletGroup.position.y) * 0.12;
+                braceletGroup.position.z = targetZ;
+                
+                const width = getWristWidth(lm);
+                let scale = Math.min(Math.max(width / CONFIG.braceletBaseRadius, 0.7), 1.5);
+                innerRing.scale.set(scale, scale, scale);
+                outerRing.scale.set(scale, scale, scale);
+                
+                // Визначення кулака
+                const fingers = [8,12,16,20];
+                let curled = 0;
+                for (let tip of fingers) if (lm[tip].y > lm[tip-2].y + 0.02) curled++;
+                fistState = curled >= 3;
+                
+                // Активуємо голограму тільки в момент стискання (і якщо ще не активована)
+                if (fistState && !lastFistState && !hologramActive) {
+                    hologramActive = true;
+                    hologramGroup.visible = true;
+                    statusDiv.innerHTML += ' | ✨ ГОЛОГРАМА АКТИВОВАНА ✨';
+                    if (navigator.vibrate) navigator.vibrate(100);
+                    // Якщо відео ще не грає – запускаємо
+                    if (hologramVideo.paused) tryPlayVideo();
+                }
+                // Якщо розтиснули – голограма залишається, але ми не ховаємо її (вона залишається видимою, поки рука в кадрі)
+                // Але якщо рука зникне – вона сховається, а при новій появі потрібен новий кулак.
+                // Тому не скидаємо hologramActive при розтисканні, але при зникненні руки – скинемо.
+                lastFistState = fistState;
+                braceletGroup.visible = true;
+            } else {
+                if (handVisible) {
+                    handVisible = false;
+                    statusDiv.innerHTML = '👋 Рука зникла... Покажіть знову для браслета.';
+                    braceletGroup.visible = false;
+                    hologramGroup.visible = false;
+                    hologramActive = false;   // скидаємо, щоб наступного разу треба було знову стиснути кулак
+                    lastFistState = false;
+                }
+            }
             requestAnimationFrame(detectionLoop);
         }
-
+        
         // Анімація
         function animate() {
             requestAnimationFrame(animate);
             const now = performance.now() / 1000;
-            
-            if (videoReady && hologramGroup.visible && !hologramVideo.paused) {
-                videoTexture.needsUpdate = true;
-            }
-            
             if (braceletGroup.visible) {
-                mainRing.rotation.y += CONFIG.rotationSpeed;
+                innerRing.rotation.y += CONFIG.rotationSpeed;
                 outerRing.rotation.y -= CONFIG.rotationSpeed * 0.8;
-                symbolsGroup.rotation.y += 0.005;
-                symbolsGroup.rotation.x = Math.sin(now * 0.5) * 0.05;
-                
-                const targetGlow = hologramFixed ? CONFIG.glowActive : CONFIG.glowIdle;
-                ringMat.emissiveIntensity += (targetGlow - ringMat.emissiveIntensity) * 0.08;
-                pointLight.intensity = ringMat.emissiveIntensity * 0.9;
+                const targetGlow = hologramActive ? CONFIG.glowActive : CONFIG.glowIdle;
+                innerRingMat.emissiveIntensity += (targetGlow - innerRingMat.emissiveIntensity) * 0.08;
+                pointLight.intensity = innerRingMat.emissiveIntensity * 0.9;
             }
-            
             if (hologramGroup.visible && hologramMaterial.uniforms) {
                 hologramMaterial.uniforms.uTime.value = now;
-                particles.forEach((p, idx) => {
+                videoTexture.needsUpdate = true;
+                // Анімація частинок
+                particlesGroup.children.forEach((p, idx) => {
                     const angle = now * p.userData.speed + p.userData.angle;
                     p.position.x = Math.cos(angle) * p.userData.radius;
                     p.position.z = Math.sin(angle) * p.userData.radius;
                     p.position.y = Math.sin(angle * 2) * 0.05;
                 });
             }
-            
             renderer.render(scene, camera);
         }
-
-        // Скидання
-        document.getElementById('reset').onclick = () => {
-            isHandVisible = false;
-            braceletGroup.visible = false;
-            hologramFixed = false;
-            hologramGroup.visible = false;
-            lastFistState = false;
-            // не зупиняємо відео, але ховаємо
-            statusDiv.innerHTML = '👋 Скинуто. Покажіть руку і стисніть кулак для активації голограми.';
+        
+        // Перемикання камери
+        cameraToggleBtn.onclick = async () => {
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            await startCamera();
         };
-
+        
+        // Скидання
+        resetBtn.onclick = () => {
+            handVisible = false;
+            braceletGroup.visible = false;
+            hologramGroup.visible = false;
+            hologramActive = false;
+            lastFistState = false;
+            statusDiv.innerHTML = '👋 Скинуто. Покажіть руку → стисніть кулак.';
+            // Відео не зупиняємо, але ховаємо
+        };
+        
+        // Запуск
         async function init() {
-            const mediapipeOk = await initMediaPipe();
-            const cameraOk = await startCamera();
-            if (mediapipeOk && cameraOk) {
-                braceletGroup.visible = false;
-                animate();
-                detectionLoop();
-                loadingDiv.style.display = 'none';
-            } else {
-                showError("Не вдалося ініціалізувати камеру або MediaPipe.");
-            }
+            await initMediaPipe();
+            await startCamera();
+            braceletGroup.visible = false;
+            animate();
+            detectionLoop();
+            loadingDiv.style.display = 'none';
         }
-        init();
+        init().catch(e => console.error(e));
     </script>
 </body>
 </html>
